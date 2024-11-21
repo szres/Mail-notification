@@ -1,60 +1,138 @@
 import PostalMime from 'postal-mime';
+import { Bot } from 'grammy';
 import { EmailMessage } from 'cloudflare:email';
+
+function parseIngressNotification(textContent, htmlContent) {
+	try {
+		// Parse text content for basic information
+		const lines = textContent.split('\n').map((line) => line.trim());
+
+		// Extract agent info from text
+		const agentInfo = {
+			name: lines
+				.find((line) => line.startsWith('Agent Name:'))
+				?.split(':')[1]
+				?.trim(),
+			faction: lines
+				.find((line) => line.startsWith('Faction:'))
+				?.split(':')[1]
+				?.trim(),
+			level: lines
+				.find((line) => line.startsWith('Current Level:'))
+				?.split(':')[1]
+				?.trim(),
+		};
+
+		// Extract portal info from text
+		const portalIndex = lines.findIndex((line) => line === 'DAMAGE REPORT') + 1;
+		const portalName = lines[portalIndex + 1]?.trim();
+		const portalAddress = lines[portalIndex + 2]?.trim();
+
+		// Parse HTML content for images and attack details
+		const portalImageMatch = htmlContent.match(/src="(https:\/\/lh3\.googleusercontent\.com\/[^"]+)"/);
+		const portalImage = portalImageMatch ? portalImageMatch[1] : null;
+
+		const mapUrlMatch = htmlContent.match(/src="(http:\/\/maps\.googleapis\.com\/maps\/api\/staticmap[^"]+)"/);
+		const mapUrl = mapUrlMatch ? mapUrlMatch[1] : null;
+
+		const coordsMatch = mapUrl ? mapUrl.match(/center=([\d.-]+),([\d.-]+)/) : null;
+		const coordinates = coordsMatch
+			? {
+					lat: coordsMatch[1],
+					lng: coordsMatch[2],
+				}
+			: null;
+
+		// Extract damage info from text
+		const damageStart = lines.findIndex((line) => line === 'DAMAGE:');
+		const statusStart = lines.findIndex((line) => line === 'STATUS:');
+
+		const damageLines = lines
+			.slice(damageStart + 1, statusStart)
+			.filter((line) => line)
+			.map((line) => line.trim());
+
+		const statusLines = lines
+			.slice(statusStart + 1)
+			.filter((line) => line)
+			.map((line) => line.trim());
+
+		// Extract attacker info
+		const attackerMatch = damageLines[0].match(/by (.+) at (\d{2}:\d{2})/);
+		const attackerInfo = attackerMatch
+			? {
+					name: attackerMatch[1],
+					time: attackerMatch[2],
+				}
+			: null;
+
+		return {
+			agent: agentInfo,
+			portal: {
+				name: portalName,
+				address: portalAddress,
+				image: portalImage,
+				coordinates,
+			},
+			attack: {
+				attacker: attackerInfo,
+				damage: damageLines,
+				status: statusLines,
+			},
+		};
+	} catch (error) {
+		console.error('Error parsing notification:', error);
+		return null;
+	}
+}
 
 export default {
 	async email(message, env, ctx) {
+		const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+
 		try {
-			// use PostalMime analyze email
 			const parser = new PostalMime();
 			const email = await parser.parse(message.raw);
 
-			const from = message.from;
-			const to = message.to;
-			const subject = email.subject.replace(/！$/u, '').trim() || '';
+			const ingressData = parseIngressNotification(email.text, email.html);
 
-			// Log email details
-			console.log('========= Email Received =========');
-			console.log('From:', from);
-			console.log('To:', to);
-			console.log('Subject:', subject);
-			console.log('Email Content:', email);
-			console.log('Text Content:', email.text);
-			console.log('HTML Content:', email.html);
-			console.log('================================');
+			if (ingressData) {
+				// Create a single formatted message with image preview
+				const telegramMessage = `
+🚨 *Portal Attack Alert!*
 
-			// Create forward email using MIMEText
-			const msg = createMimeMessage();
-			msg.setSender({ name: 'Mail Forwarder', addr: message.to });
-			msg.setRecipient('digby@65mail.cn');
-			msg.setSubject(`Fwd: ${subject}`);
+🏛 *Portal Information*
+Name: \`${ingressData.portal.name}\`
+Address: ${ingressData.portal.address}
+[Portal Image](${ingressData.portal.image})
 
-			// Prepare forwarded message content
-			const forwardContent = `
-                ---------- Forwarded message ----------
-                From: ${from}
-                Date: ${new Date().toISOString()}
-                Subject: ${subject}
-                To: ${to}
+👤 *Attack Details*
+Attacker: \`${ingressData.attack.attacker.name}\`
+Time: ${ingressData.attack.attacker.time} GMT
 
-                ${email.html || email.text}
-            `;
+💥 *Damage Report*
+${ingressData.attack.damage.join('\n')}
 
-			msg.addMessage({
-				contentType: 'text/html',
-				data: forwardContent,
-			});
+📊 *Current Status*
+${ingressData.attack.status.join('\n')}
 
-			// Create and send the email message
-			const forwardMessage = new EmailMessage(
-				message.to, // from
-				'', // to
-				msg.asRaw(),
-			);
+🗺 [View on Intel Map](https://intel.ingress.com/intel?ll=${ingressData.portal.coordinates.lat},${ingressData.portal.coordinates.lng}&z=19)
 
-			await env.FORWARD_EMAIL.send(forwardMessage);
-			console.log('Email forwarded successfully');
+👮 *Defending Agent*
+Agent: ${ingressData.agent.name} (${ingressData.agent.faction} ${ingressData.agent.level})
+`;
+
+				// Send single message with everything included
+				await bot.api.sendMessage(1981952686, telegramMessage, {
+					parse_mode: 'Markdown',
+					disable_web_page_preview: false, // Enable preview for the portal image
+				});
+
+				console.log('Notification sent successfully');
+			}
 		} catch (error) {
 			console.error('Error processing email:', error);
+			await bot.api.sendMessage(1981952686, `⚠️ Error processing Ingress notification: ${error.message}`);
 		}
 	},
 
