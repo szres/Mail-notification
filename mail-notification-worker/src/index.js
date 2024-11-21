@@ -123,7 +123,7 @@ Agent: ${ingressData.agent.name} (${ingressData.agent.faction} ${ingressData.age
 `;
 
 				// Send single message with everything included
-				await bot.api.sendMessage(1981952686, telegramMessage, {
+				await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, telegramMessage, {
 					parse_mode: 'Markdown',
 					disable_web_page_preview: false, // Enable preview for the portal image
 				});
@@ -132,7 +132,7 @@ Agent: ${ingressData.agent.name} (${ingressData.agent.faction} ${ingressData.age
 			}
 		} catch (error) {
 			console.error('Error processing email:', error);
-			await bot.api.sendMessage(1981952686, `⚠️ Error processing Ingress notification: ${error.message}`);
+			await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, `⚠️ Error processing Ingress notification: ${error.message}`);
 		}
 	},
 
