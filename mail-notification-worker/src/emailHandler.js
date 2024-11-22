@@ -1,224 +1,90 @@
-/**
- * Email handler and parser for Ingress notification emails
- * @module emailHandler
- */
-
-/**
- * Cleans text by removing HTML entities and extra whitespace
- */
-function cleanText(text) {
-	return text
-		.replace(/&nbsp;/g, ' ')
-		.replace(/\s+/g, ' ')
-		.trim();
-}
-
-/**
- * Extracts plain text from HTML content
- */
-function extractTextFromHtml(html) {
-	return html
-		.replace(/<br>/gi, '\n')
-		.replace(/<div[^>]*>/gi, '\n')
-		.replace(/<[^>]+>/g, '')
-		.replace(/&nbsp;/g, ' ')
-		.split('\n')
-		.map((line) => cleanText(line))
-		.filter((line) => line && line !== ' ')
-		.join('\n');
-}
-
-/**
- * Extracts damage information from HTML content
- */
-function extractDamageInfo(html) {
-	const damageMatch = html.match(/DAMAGE:<br>([^<]+(?:<br>[^<]+)*)/);
-	if (damageMatch) {
-		return damageMatch[1]
-			.split('<br>')
-			.map((line) => cleanText(line))
-			.filter((line) => line);
+// emailHandler.js
+class EmailParser {
+	constructor(email) {
+		this.html = email.html || '';
+		this.text = email.text || '';
 	}
-	return ['No damage information available'];
-}
 
-/**
- * Extracts status information from HTML content
- */
-function extractStatusInfo(html) {
-	const statusMatch = html.match(/STATUS:<br>([^<]+(?:<br>[^<]+)*)/);
-	if (statusMatch) {
-		return statusMatch[1]
-			.split('<br>')
-			.map((line) => cleanText(line))
-			.filter((line) => line);
+	isIngressNotification() {
+		return this.html.includes('Ingress Portal Status') || this.html.includes('DAMAGE REPORT');
 	}
-	return ['No status information available'];
-}
 
-/**
- * Extracts portal information from HTML content
- */
-const extractPortalInfo = (html) => {
-	try {
-		const portalInfoMatch = html.match(/<div>([^<]+)<\/div>\s*<div><a[^>]+>([^<]+)<\/a><\/div>/);
-		if (portalInfoMatch) {
-			return {
-				name: cleanText(portalInfoMatch[1]),
-				address: cleanText(portalInfoMatch[2]),
-			};
-		}
+	extractPortalInfo() {
+		const portalRegex = /<div[^>]*>([^<]+)<\/div>\s*<div><a[^>]+>([^<]+)<\/a><\/div>/;
+		const imageRegex = /src="(https:\/\/lh3\.googleusercontent\.com\/[^"]+)"/;
+		const coordsRegex = /intel\?ll=([\d.-]+),([\d.-]+)/;
 
-		const divContents = [...html.matchAll(/<div[^>]*>([^<]+)<\/div>/g)]
-			.map((match) => cleanText(match[1]))
-			.filter((text) => text && !text.includes('DAMAGE REPORT'));
-
-		const damageReportIndex = divContents.findIndex((text) => text.includes('DAMAGE REPORT'));
-		if (damageReportIndex !== -1 && divContents[damageReportIndex + 1]) {
-			return {
-				name: divContents[damageReportIndex + 1],
-				address: divContents[damageReportIndex + 2] || 'Unknown Location',
-			};
-		}
-
-		return { name: 'Unknown Portal', address: 'Unknown Location' };
-	} catch (error) {
-		console.error('Error extracting portal info:', error);
-		return { name: 'Unknown Portal', address: 'Unknown Location' };
-	}
-};
-
-/**
- * Extracts portal image URL from HTML content
- */
-const extractPortalImage = (html) => {
-	try {
-		const portalImageMatch = html.match(/src="(https:\/\/lh3\.googleusercontent\.com\/[^"]+)"/);
-		return portalImageMatch ? portalImageMatch[1] : null;
-	} catch (error) {
-		console.error('Error extracting portal image:', error);
-		return null;
-	}
-};
-
-/**
- * Extracts coordinates from HTML content
- */
-const extractCoordinates = (html) => {
-	try {
-		const mapUrlMatch = html.match(/center=([\d.-]+),([\d.-]+)/);
-		return mapUrlMatch
-			? {
-					lat: mapUrlMatch[1],
-					lng: mapUrlMatch[2],
-				}
-			: null;
-	} catch (error) {
-		console.error('Error extracting coordinates:', error);
-		return null;
-	}
-};
-
-/**
- * Extracts attacker information from HTML content
- */
-const extractAttackerInfo = (html) => {
-	try {
-		const attackerMatch = html.match(/color: #428F43;">([^<]+)<\/span> at (\d{2}:\d{2})/);
-		return attackerMatch
-			? {
-					name: attackerMatch[1],
-					time: attackerMatch[2],
-				}
-			: {
-					name: 'Unknown',
-					time: 'Unknown',
-				};
-	} catch (error) {
-		console.error('Error extracting attacker info:', error);
-		return { name: 'Unknown', time: 'Unknown' };
-	}
-};
-
-/**
- * Extracts agent information from HTML content
- */
-const extractAgentInfo = (html) => {
-	try {
-		const agentMatch = html.match(/color: #3679B9;">([^<]+)<\/span>/);
-		const factionMatch = html.match(/Faction:<\/span><span[^>]*>([^<]+)<\/span>/);
-		const levelMatch = html.match(/Current Level:<\/span>([^<]+)</);
+		const portal = this.html.match(portalRegex) || [];
+		const image = this.html.match(imageRegex);
+		const coords = this.html.match(coordsRegex);
 
 		return {
-			name: agentMatch ? cleanText(agentMatch[1]) : 'Unknown',
-			faction: factionMatch ? cleanText(factionMatch[1]) : 'Unknown',
-			level: levelMatch ? cleanText(levelMatch[1]) : 'Unknown',
+			name: portal[1]?.trim() || 'Unknown Portal',
+			address: portal[2]?.trim() || 'Unknown Location',
+			image: image?.[1] || null,
+			coordinates: coords ? { lat: coords[1], lng: coords[2] } : null,
 		};
-	} catch (error) {
-		console.error('Error extracting agent info:', error);
-		return { name: 'Unknown', faction: 'Unknown', level: 'Unknown' };
 	}
-};
 
-/**
- * Parses Ingress notification email content
- */
-const parseIngressNotification = (email) => {
-	try {
-		const htmlContent = email.html || '';
+	extractAttackInfo() {
+		const attackRegex = /color: #428F43[^>]+>([^<]+)<\/span>\s*at\s*(\d{2}:\d{2})/;
+		const attack = this.html.match(attackRegex) || [];
 
-		const portalInfo = extractPortalInfo(htmlContent);
-		const portalImage = extractPortalImage(htmlContent);
-		const coordinates = extractCoordinates(htmlContent);
-		const attackerInfo = extractAttackerInfo(htmlContent);
-		const agentInfo = extractAgentInfo(htmlContent);
+		const getDamageSection = (type) => {
+			const regex = new RegExp(`${type}:<br>([^<]+(?:<br>[^<]+)*)`, 'i');
+			return (
+				this.html
+					.match(regex)?.[1]
+					?.split('<br>')
+					.map((line) => line.trim())
+					.filter(Boolean) || [`No ${type.toLowerCase()} information`]
+			);
+		};
 
 		return {
-			agent: agentInfo,
-			portal: {
-				...portalInfo,
-				image: portalImage,
-				coordinates,
+			attacker: {
+				name: attack[1] || 'Unknown Attacker',
+				time: attack[2] || 'Unknown Time',
 			},
-			attack: {
-				attacker: attackerInfo,
-				damage: extractDamageInfo(htmlContent),
-				status: extractStatusInfo(htmlContent),
-			},
+			damage: getDamageSection('DAMAGE'),
+			status: getDamageSection('STATUS'),
 		};
-	} catch (error) {
-		console.error('Parsing error:', error);
-		throw error;
 	}
-};
+}
 
-/**
- * Formats notification data into a Telegram message
- */
-const formatTelegramMessage = (ingressData) => {
-	return `
-🚨 *Portal Attack Alert!*
+export function parseIngressEmail(email) {
+	const parser = new EmailParser(email);
+	if (!parser.isIngressNotification()) return null;
 
-🏛 *Portal Information*
-Name: \`${ingressData.portal.name}\`
-Address: ${ingressData.portal.address}
-${ingressData.portal.image ? `[Portal Image](${ingressData.portal.image})` : ''}
+	return {
+		portal: parser.extractPortalInfo(),
+		attack: parser.extractAttackInfo(),
+	};
+}
 
-👤 *Attack Details*
-Attacker: \`${ingressData.attack.attacker.name}\`
-Time: ${ingressData.attack.attacker.time} GMT
+export function formatTelegramMessage(data) {
+	const sections = [
+		'🚨 *Portal Attack Alert!*',
+		'',
+		'🏛 *Portal Information*',
+		`Name: \`${data.portal.name}\``,
+		`Address: ${data.portal.address}`,
+		data.portal.image ? `[Portal Image](${data.portal.image})` : '',
+		'',
+		'👤 *Attack Details*',
+		`Attacker: \`${data.attack.attacker.name}\``,
+		`Time: ${data.attack.attacker.time} GMT`,
+		'',
+		'💥 *Damage Report*',
+		data.attack.damage.join('\n'),
+		'',
+		'📊 *Current Status*',
+		data.attack.status.join('\n'),
+		'',
+		data.portal.coordinates
+			? `🗺 [Intel Map](https://intel.ingress.com/intel?ll=${data.portal.coordinates.lat},${data.portal.coordinates.lng}&z=19)`
+			: '',
+	];
 
-💥 *Damage Report*
-${ingressData.attack.damage.join('\n') || 'No damage information available'}
-
-📊 *Current Status*
-${ingressData.attack.status.join('\n') || 'No status information available'}
-
-${ingressData.portal.coordinates ? `🗺 [View on Intel Map](https://intel.ingress.com/intel?ll=${ingressData.portal.coordinates.lat},${ingressData.portal.coordinates.lng}&z=19)` : ''}
-
-👮 *Defending Agent*
-Agent: ${ingressData.agent.name} (${ingressData.agent.faction} ${ingressData.agent.level})
-`;
-};
-
-export { parseIngressNotification, formatTelegramMessage };
+	return sections.filter(Boolean).join('\n').trim();
+}
