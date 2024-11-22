@@ -47,9 +47,8 @@ export class AgentDatabase {
 		}
 	}
 
-	async createAgent(telegramId, agentName, faction) {
+	async createAgent(telegramId, agentName, faction, email) {
 		try {
-			const email = `${crypto.randomUUID()}@szres.org`;
 			const stmt = this.db.prepare(`
                 INSERT INTO agents (telegram_id, agent_name, faction, notification_email)
                 VALUES (?1, ?2, ?3, ?4)
@@ -57,6 +56,58 @@ export class AgentDatabase {
 			return await stmt.bind(telegramId, agentName, faction, email).run();
 		} catch (error) {
 			log.error('Create agent error:', error);
+			throw error;
+		}
+	}
+
+	async deleteAgent(telegramId) {
+		try {
+			// First verify agent exists
+			const agent = await this.getAgent(telegramId);
+			if (!agent) {
+				throw new Error('Agent not found');
+			}
+
+			// Delete in correct order to handle foreign key constraints
+			const results = await this.db.batch([
+				// 1. Delete registrations (no foreign key constraints)
+				this.db
+					.prepare(
+						`
+						DELETE FROM registrations
+						WHERE telegram_id = ?1
+						`,
+					)
+					.bind(telegramId),
+
+				// 2. Clear invitation references before deleting agent
+				this.db
+					.prepare(
+						`
+						UPDATE invitations
+						SET created_by = NULL,
+							used_by = NULL,
+							status = 'revoked'
+						WHERE created_by = ?1 OR used_by = ?1
+						`,
+					)
+					.bind(telegramId),
+
+				// 3. Finally delete the agent
+				this.db
+					.prepare(
+						`
+						DELETE FROM agents
+						WHERE telegram_id = ?1
+						`,
+					)
+					.bind(telegramId),
+			]);
+
+			log.info('Agent deleted successfully:', telegramId);
+			return true;
+		} catch (error) {
+			log.error('Delete agent error:', error);
 			throw error;
 		}
 	}
@@ -132,6 +183,12 @@ export class AgentDatabase {
 
 	async createInvitation(createdBy) {
 		try {
+			// First check if the agent exists
+			const agent = await this.getAgent(createdBy);
+			if (!agent) {
+				throw new Error('Agent not found');
+			}
+
 			const invitationCode = crypto.randomUUID();
 			const expiresAt = new Date();
 			expiresAt.setHours(expiresAt.getHours() + 24);
@@ -178,9 +235,26 @@ export class AgentDatabase {
                 AND used_by IS NULL
             `);
 			const result = await stmt.bind(code, usedBy).run();
-			return result.changes > 0;
+			if (result.changes === 0) {
+				throw new Error('Invalid or expired invitation code');
+			}
+			return true;
 		} catch (error) {
 			log.error('Mark invitation used error:', error);
+			throw error;
+		}
+	}
+
+	async resetDatabase() {
+		try {
+			await this.db.batch([
+				this.db.prepare('DELETE FROM registrations'),
+				this.db.prepare('DELETE FROM invitations'),
+				this.db.prepare('DELETE FROM agents'),
+			]);
+			return true;
+		} catch (error) {
+			log.error('Reset database error:', error);
 			throw error;
 		}
 	}

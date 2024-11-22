@@ -12,34 +12,77 @@ export default {
 				throw new Error('Missing required environment variables');
 			}
 
-			const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
-
-			log.info('Processing email from:', message.from);
-			const parser = new PostalMime();
-			const email = await parser.parse(message.raw);
+			// Early validation of email
+			if (!message.to) {
+				log.info('No sender email address, ignoring');
+				return;
+			}
 
 			const db = new AgentDatabase(env.emaildb);
+
+			// Check if email is assigned to an agent
+			const agent = await db.getAgentByEmail(message.to);
+			if (!agent) {
+				log.info('Email not assigned to any agent, ignoring:', message.to);
+				return;
+			}
+
+			log.info('Processing email from agent:', {
+				email: message.from,
+				agent: agent.agent_name,
+				faction: agent.faction,
+			});
+
+			const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+			const parser = new PostalMime();
+			const email = await parser.parse(message.raw);
 
 			// Parse notification
 			const ingressData = parseIngressEmail(email);
 			if (!ingressData) {
-				log.info('Not an Ingress notification email');
+				log.info('Not an Ingress notification email, ignoring');
 				return;
 			}
 
+			// Add agent info to the notification data
+			const enrichedData = {
+				...ingressData,
+				agent: {
+					name: agent.agent_name,
+					faction: agent.faction,
+					telegram_id: agent.telegram_id,
+				},
+			};
+
 			// Send to Telegram
-			const telegramMessage = formatTelegramMessage(ingressData);
-			await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, telegramMessage, {
+			const telegramMessage = formatTelegramMessage(enrichedData);
+
+			// Send to the agent's Telegram chat
+			await bot.api.sendMessage(agent.telegram_id, telegramMessage, {
 				parse_mode: 'Markdown',
 				disable_web_page_preview: false,
 			});
 
-			log.info('Notification sent successfully');
+			// Also send to admin chat if configured
+			if (env.TELEGRAM_CHAT_ID && env.TELEGRAM_CHAT_ID !== agent.telegram_id.toString()) {
+				await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, telegramMessage, {
+					parse_mode: 'Markdown',
+					disable_web_page_preview: false,
+				});
+			}
+
+			log.info('Notification processed and sent successfully', {
+				agent: agent.agent_name,
+				email: message.from,
+			});
 		} catch (error) {
 			log.error('Email processing error:', error);
 			try {
 				const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
-				await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, `⚠️ Error processing notification:\n${error.message}`);
+				await bot.api.sendMessage(
+					env.TELEGRAM_CHAT_ID,
+					`⚠️ Error processing notification:\n` + `From: ${message.from}\n` + `Error: ${error.message}`,
+				);
 			} catch (notifyError) {
 				log.error('Failed to send error notification:', notifyError);
 			}
@@ -59,7 +102,7 @@ export default {
 			const db = new AgentDatabase(env.emaildb);
 			await db.initializeTables();
 
-			const telegramHandler = new TelegramHandler(bot, db);
+			const telegramHandler = new TelegramHandler(bot, db, env);
 
 			if (url.pathname === '/webhook') {
 				log.info('Processing webhook request');
