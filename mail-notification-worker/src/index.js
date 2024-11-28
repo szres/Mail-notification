@@ -4,6 +4,9 @@ import { AgentDatabase } from './db';
 import { TelegramHandler } from './telegram';
 import { parseIngressEmail, formatTelegramMessage } from './emailHandler';
 import { log } from './utils';
+import { EmailMessage } from 'cloudflare:email';
+
+const fetch = require('node-fetch');
 
 export default {
 	async email(message, env, ctx) {
@@ -40,10 +43,16 @@ export default {
 			// Parse notification
 			const ingressData = parseIngressEmail(email);
 			if (!ingressData) {
+				await message.forward(env.FALLBACKEMAILL);
 				log.info('Not an Ingress notification email, ignoring');
 				return;
 			}
-
+			log.info('Email text', {
+				emailtext: email.text || '',
+			});
+			log.info('Email html', {
+				emailtext: email.html || '',
+			});
 			// Add agent info to the notification data
 			const enrichedData = {
 				...ingressData,

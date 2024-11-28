@@ -177,7 +177,7 @@ export class TelegramHandler {
 				// Send welcome message with email
 				await this.bot.api.sendMessage(
 					chatId,
-					`✅ Registration complete!\nWelcome agent ${registration.data.agentName}!\nYour forwarding address is:\n\`${email}\``,
+					`✅ Registration complete!\nWelcome agent ${registration.data.agentName}!\nYour forwarding address is:\n\`${email}\`\nPlease set forward rule:\n\`ingress-support@nianticlabs.com\` \nforward to\n\`${email}\``,
 					{
 						parse_mode: 'Markdown',
 					},

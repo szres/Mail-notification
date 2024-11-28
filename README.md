@@ -51,6 +51,7 @@ compatibility_date = "2024-01-01"
 TELEGRAM_BOT_TOKEN = ""  # Set via secrets
 WEBHOOK_SECRET = ""      # Set via secrets
 TELEGRAM_CHAT_ID = ""    # Set via secrets
+EMAILSUFFIX = ""
 
 [[d1_databases]]
 binding = "emaildb"
