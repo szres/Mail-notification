@@ -1,6 +1,6 @@
 # Ingress Portal Attack Notification Bot
 
-A Cloudflare Worker that processes Ingress portal attack notification emails and forwards them to Telegram as formatted messages. Includes agent registration and invitation system.
+A Cloudflare Worker that processes Ingress portal attack notification emails and forwards them to Telegram as formatted messages. Includes agent registration, invitation system, and rule-based notification filtering.
 
 ## Features
 
@@ -12,6 +12,15 @@ A Cloudflare Worker that processes Ingress portal attack notification emails and
   - Attack details (attacker, time, damage)
   - Portal status
   - Portal images and map links
+
+### Rule-Based Filtering
+- Multiple rule types support:
+  - Agent-based rules (match specific agents)
+  - Geographic rules (polygon/radius areas)
+  - Portal name rules
+- Rule combination support
+- Attack history tracking
+- Rule set management API
 
 ### Telegram Integration
 - Sends formatted notifications to Telegram
@@ -78,6 +87,73 @@ npm install
 npm run deploy
 ```
 
+## API Documentation
+
+### Rule Sets API
+
+#### Get All Rule Sets
+```bash
+curl https://your-worker.workers.dev/rulesets
+```
+
+Response:
+```json
+{
+    "success": true,
+    "data": [
+        {
+            "uuid": "test-agent-rule-001",
+            "name": "Agent Rule",
+            "description": "Monitor specific agent",
+            "rules": [{
+                "type": "agent",
+                "value": "AgentName"
+            }],
+            "record_count": 42,
+            "last_record_at": "2024-03-11T12:34:56Z"
+        },
+        {
+            "uuid": "test-area-rule-001",
+            "name": "Area Rule",
+            "description": "Monitor specific area",
+            "rules": [{
+                "type": "polygon",
+                "points": [
+                    {"lat": 22.5924, "lng": 113.8976},
+                    {"lat": 22.5616, "lng": 113.8468}
+                ]
+            }],
+            "record_count": 15,
+            "last_record_at": "2024-03-11T10:30:00Z"
+        }
+    ]
+}
+```
+
+#### Get Rule Set Records
+```bash
+curl "https://your-worker.workers.dev/ruleset/test-agent-rule-001?startDate=2024-03-01&agent=AgentName"
+```
+
+Response:
+```json
+{
+    "success": true,
+    "data": [
+        {
+            "id": 1,
+            "portal_name": "Test Portal",
+            "portal_address": "Test Location",
+            "latitude": 22.5924,
+            "longitude": 113.8976,
+            "agent_name": "AgentName",
+            "timestamp": "2024-03-11T12:34:56Z",
+            "meet_rule_sets": ["test-agent-rule-001"]
+        }
+    ]
+}
+```
+
 ## Bot Commands
 
 - `/start` - Start registration with invitation code
@@ -125,6 +201,8 @@ Agent: [Agent Name] (Faction)
 - `agents`: Stores agent information
 - `registrations`: Manages registration process
 - `invitations`: Handles invitation system
+- `rule_sets`: Stores notification rules
+- `records`: Stores attack records
 
 ### Security Features
 - Invitation-based registration
@@ -157,14 +235,17 @@ npm run dev
 ### Database Management
 ```bash
 # Access D1 shell
-wrangler d1 shell email_notification_db
+## Error Handling
 
-# Execute SQL file
-wrangler d1 execute email_notification_db --file ./schema.sql
-```
+- Comprehensive error catching and reporting
+- Database operation validation
+- Debug logging for troubleshooting
+- Error notifications via Telegram
+- Registration state management
 
-### Webhook Setup
-Set the webhook URL to:
-```
-https://your-worker.workers.dev/webhook
-```
+## Limitations
+
+- Relies on Ingress email notification format
+- Requires Cloudflare Workers and D1
+- Email must be properly formatted (HTML or text)
+- One Telegram account per agent
